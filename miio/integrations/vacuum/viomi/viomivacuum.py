@@ -58,6 +58,7 @@ from miio.integrations.vacuum.roborock.vacuumcontainers import (
     ConsumableStatus,
     DNDStatus,
 )
+from miio.interfaces import FanspeedPresets, VacuumInterface
 from miio.utils import pretty_seconds
 
 _LOGGER = logging.getLogger(__name__)
@@ -337,11 +338,6 @@ class ViomiVacuumStatus(DeviceStatus):
         """Current fan speed."""
         return ViomiVacuumSpeed(self.data["suction_grade"])
 
-    @command()
-    def fan_speed_presets(self) -> Dict[str, int]:
-        """Return dictionary containing supported fanspeeds."""
-        return {x.name: x.value for x in list(ViomiVacuumSpeed)}
-
     @property
     def water_grade(self) -> ViomiWaterGrade:
         """Water grade."""
@@ -482,7 +478,7 @@ def _get_rooms_from_schedules(schedules: List[str]) -> Tuple[bool, Dict]:
     return scheduled_found, rooms
 
 
-class ViomiVacuum(Device):
+class ViomiVacuum(Device, VacuumInterface):
     """Interface for Viomi vacuums (viomi.vacuum.v7)."""
 
     _supported_models = SUPPORTED_MODELS
@@ -675,6 +671,20 @@ class ViomiVacuum(Device):
     def set_fan_speed(self, speed: ViomiVacuumSpeed):
         """Set fanspeed [silent, standard, medium, turbo]."""
         self.send("set_suction", [speed.value])
+
+    @command()
+    def fan_speed_presets(self) -> FanspeedPresets:
+        """Return available fan speed presets."""
+        return {x.name: x.value for x in list(ViomiVacuumSpeed)}
+
+    @command(click.argument("speed", type=int))
+    def set_fan_speed_preset(self, speed_preset: int) -> None:
+        """Set fan speed preset speed."""
+        if speed_preset not in self.fan_speed_presets().values():
+            raise ValueError(
+                f"Invalid preset speed {speed_preset}, not in: {self.fan_speed_presets().values()}"
+            )
+        self.send("set_suction", [speed_preset])
 
     @command(click.argument("watergrade", type=EnumType(ViomiWaterGrade)))
     def set_water_grade(self, watergrade: ViomiWaterGrade):

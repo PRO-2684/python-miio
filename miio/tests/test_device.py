@@ -6,6 +6,7 @@ from miio import Device, MiotDevice, RoborockVacuum
 from miio.exceptions import DeviceInfoUnavailableException, PayloadDecodeException
 
 DEVICE_CLASSES = Device.__subclasses__() + MiotDevice.__subclasses__()  # type: ignore
+DEVICE_CLASSES.remove(MiotDevice)
 
 
 @pytest.mark.parametrize("max_properties", [None, 1, 15])
@@ -57,6 +58,31 @@ def test_unavailable_device_info_raises(mocker):
         d.info()
 
     assert send.call_count == 1
+
+
+def test_device_id_handshake(mocker):
+    """Make sure send_handshake() gets called if did is unknown."""
+    handshake = mocker.patch("miio.Device.send_handshake")
+    _ = mocker.patch("miio.Device.send")
+
+    d = Device("127.0.0.1", "68ffffffffffffffffffffffffffffff")
+
+    d.device_id
+
+    handshake.assert_called()
+
+
+def test_device_id(mocker):
+    """Make sure send_handshake() does not get called if did is already known."""
+    handshake = mocker.patch("miio.Device.send_handshake")
+    _ = mocker.patch("miio.Device.send")
+
+    d = Device("127.0.0.1", "68ffffffffffffffffffffffffffffff")
+    d._protocol._device_id = b"12345678"
+
+    d.device_id
+
+    handshake.assert_not_called()
 
 
 def test_model_autodetection(mocker):
@@ -119,7 +145,4 @@ def test_device_ctor_model(cls):
 @pytest.mark.parametrize("cls", DEVICE_CLASSES)
 def test_device_supported_models(cls):
     """Make sure that every device subclass has a non-empty supported models."""
-    if cls.__name__ == "MiotDevice":  # skip miotdevice
-        return
-
     assert cls.supported_models

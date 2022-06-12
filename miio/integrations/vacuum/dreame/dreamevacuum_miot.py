@@ -8,6 +8,7 @@ import click
 
 from miio.click_common import command, format_output
 from miio.exceptions import DeviceException
+from miio.interfaces import FanspeedPresets, VacuumInterface
 from miio.miot_device import DeviceStatus as DeviceStatusContainer
 from miio.miot_device import MiotDevice, MiotMapping
 
@@ -20,7 +21,7 @@ DREAME_D9 = "dreame.vacuum.p2009"
 DREAME_Z10_PRO = "dreame.vacuum.p2028"
 DREAME_MOP_2_PRO_PLUS = "dreame.vacuum.p2041o"
 DREAME_MOP_2_ULTRA = "dreame.vacuum.p2150a"
-
+DREAME_MOP_2 = "dreame.vacuum.p2150o"
 
 _DREAME_1C_MAPPING: MiotMapping = {
     # https://home.miot-spec.com/spec/dreame.vacuum.mc1808
@@ -74,6 +75,7 @@ _DREAME_F9_MAPPING: MiotMapping = {
     # https://home.miot-spec.com/spec/dreame.vacuum.p2028
     # https://home.miot-spec.com/spec/dreame.vacuum.p2041o
     # https://home.miot-spec.com/spec/dreame.vacuum.p2150a
+    # https://home.miot-spec.com/spec/dreame.vacuum.p2150o
     "battery_level": {"siid": 3, "piid": 1},
     "charging_state": {"siid": 3, "piid": 2},
     "device_fault": {"siid": 2, "piid": 2},
@@ -121,6 +123,7 @@ MIOT_MAPPING: Dict[str, MiotMapping] = {
     DREAME_Z10_PRO: _DREAME_F9_MAPPING,
     DREAME_MOP_2_PRO_PLUS: _DREAME_F9_MAPPING,
     DREAME_MOP_2_ULTRA: _DREAME_F9_MAPPING,
+    DREAME_MOP_2: _DREAME_F9_MAPPING,
 }
 
 
@@ -196,6 +199,7 @@ def _get_cleaning_mode_enum_class(model):
         DREAME_Z10_PRO,
         DREAME_MOP_2_PRO_PLUS,
         DREAME_MOP_2_ULTRA,
+        DREAME_MOP_2,
     ):
         return CleaningModeDreameF9
     return None
@@ -399,7 +403,7 @@ class DreameVacuumStatus(DeviceStatusContainer):
         return None
 
 
-class DreameVacuum(MiotDevice):
+class DreameVacuum(MiotDevice, VacuumInterface):
     _mappings = MIOT_MAPPING
 
     @command(
@@ -523,12 +527,21 @@ class DreameVacuum(MiotDevice):
         return self.set_property("cleaning_mode", fanspeed.value)
 
     @command()
-    def fan_speed_presets(self) -> Dict[str, int]:
-        """Return dictionary containing supported fan speeds."""
+    def fan_speed_presets(self) -> FanspeedPresets:
+        """Return available fan speed presets."""
         fanspeeds_enum = _get_cleaning_mode_enum_class(self.model)
         if not fanspeeds_enum:
             return {}
         return _enum_as_dict(fanspeeds_enum)
+
+    @command(click.argument("speed", type=int))
+    def set_fan_speed_preset(self, speed_preset: int) -> None:
+        """Set fan speed preset speed."""
+        if speed_preset not in self.fan_speed_presets().values():
+            raise ValueError(
+                f"Invalid preset speed {speed_preset}, not in: {self.fan_speed_presets().values()}"
+            )
+        self.set_fan_speed(speed_preset)
 
     @command()
     def waterflow(self):

@@ -7,7 +7,7 @@ import math
 import os
 import pathlib
 import time
-from typing import Dict, List, Optional, Type, Union
+from typing import List, Optional, Type, Union
 
 import click
 import pytz
@@ -22,6 +22,7 @@ from miio.click_common import (
 )
 from miio.device import Device, DeviceInfo
 from miio.exceptions import DeviceException, DeviceInfoUnavailableException
+from miio.interfaces import FanspeedPresets, VacuumInterface
 
 from .vacuumcontainers import (
     CarpetModeStatus,
@@ -169,7 +170,7 @@ SUPPORTED_MODELS = [
 ]
 
 
-class RoborockVacuum(Device):
+class RoborockVacuum(Device, VacuumInterface):
     """Main class for roborock vacuums (roborock.vacuum.*)."""
 
     _supported_models = SUPPORTED_MODELS
@@ -541,39 +542,39 @@ class RoborockVacuum(Device):
         click.argument("cron"),
         click.argument("command", required=False, default=""),
         click.argument("parameters", required=False, default=""),
+        click.argument("timer_id", required=False, default=None),
     )
-    def add_timer(self, cron: str, command: str, parameters: str):
+    def add_timer(self, cron: str, command: str, parameters: str, timer_id: str):
         """Add a timer.
 
         :param cron: schedule in cron format
         :param command: ignored by the vacuum.
         :param parameters: ignored by the vacuum.
         """
-        import time
+        if not timer_id:
+            timer_id = str(int(round(time.time() * 1000)))
+        return self.send("set_timer", [[timer_id, [cron, [command, parameters]]]])
 
-        ts = int(round(time.time() * 1000))
-        return self.send("set_timer", [[str(ts), [cron, [command, parameters]]]])
-
-    @command(click.argument("timer_id", type=int))
-    def delete_timer(self, timer_id: int):
+    @command(click.argument("timer_id", type=str))
+    def delete_timer(self, timer_id: str):
         """Delete a timer with given ID.
 
-        :param int timer_id: Timer ID
+        :param str timer_id: Timer ID
         """
-        return self.send("del_timer", [str(timer_id)])
+        return self.send("del_timer", [timer_id])
 
     @command(
-        click.argument("timer_id", type=int), click.argument("mode", type=TimerState)
+        click.argument("timer_id", type=str), click.argument("mode", type=TimerState)
     )
-    def update_timer(self, timer_id: int, mode: TimerState):
+    def update_timer(self, timer_id: str, mode: TimerState):
         """Update a timer with given ID.
 
-        :param int timer_id: Timer ID
-        :param TimerStae mode: either On or Off
+        :param str timer_id: Timer ID
+        :param TimerState mode: either On or Off
         """
         if mode != TimerState.On and mode != TimerState.Off:
             raise DeviceException("Only 'On' or 'Off' are  allowed")
-        return self.send("upd_timer", [str(timer_id), mode.value])
+        return self.send("upd_timer", [timer_id, mode.value])
 
     @command()
     def dnd_status(self):
@@ -618,8 +619,8 @@ class RoborockVacuum(Device):
         return self.send("get_custom_mode")[0]
 
     @command()
-    def fan_speed_presets(self) -> Dict[str, int]:
-        """Return dictionary containing supported fan speeds."""
+    def fan_speed_presets(self) -> FanspeedPresets:
+        """Return available fan speed presets."""
 
         def _enum_as_dict(cls):
             return {x.name: x.value for x in list(cls)}
@@ -650,6 +651,15 @@ class RoborockVacuum(Device):
         _LOGGER.debug("Using fanspeeds %s for %s", fanspeeds, self.model)
 
         return _enum_as_dict(fanspeeds)
+
+    @command(click.argument("speed", type=int))
+    def set_fan_speed_preset(self, speed_preset: int) -> None:
+        """Set fan speed preset speed."""
+        if speed_preset not in self.fan_speed_presets().values():
+            raise ValueError(
+                f"Invalid preset speed {speed_preset}, not in: {self.fan_speed_presets().values()}"
+            )
+        return self.send("set_custom_mode", [speed_preset])
 
     @command()
     def sound_info(self):
@@ -931,7 +941,7 @@ class RoborockVacuum(Device):
             callback=callback,
         )
 
-        @dg.resultcallback()
+        @dg.result_callback()
         @dg.device_pass
         def cleanup(vac: RoborockVacuum, *args, **kwargs):
             if vac.ip is None:  # dummy Device for discovery, skip teardown
